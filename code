@@ -1,0 +1,218 @@
+import { useState, useEffect } from 'react';
+import { useGameStore } from './store/gameStore';
+import { setCustomQuestionsRef } from './store/gameStore';
+import { useCustomQuestions } from './store/useCustomQuestions';
+import GameBoard from './components/GameBoard';
+import ActionBar from './components/ActionBar';
+import TriviaCard from './components/TriviaCard';
+import PlayerSetup from './components/PlayerSetup';
+import PlayerPanel from './components/PlayerPanel';
+import DistrictInfo from './components/DistrictInfo';
+import GameOver from './components/GameOver';
+import QuestionEditor from './components/QuestionEditor';
+import Lobby from './components/Lobby';
+import OnlineGame from './components/OnlineGame';
+import { AnimatePresence } from 'framer-motion';
+import cdmxBadge from './assets/cdmx-badge.png';
+import { useRoomStore } from './store/roomStore';
+import { useTheme } from './store/themeContext';
+
+type AppMode = 'home' | 'local' | 'online';
+
+function App() {
+  const { phase, resetGame } = useGameStore();
+  const store = useCustomQuestions();
+  const { customQuestions, editedQuestions, deletedIds } = store;
+  const { roomCode, leaveRoom } = useRoomStore();
+  const { theme, toggleTheme } = useTheme();
+  const [showEditor, setShowEditor] = useState(false);
+  const [appMode, setAppMode] = useState<AppMode>('home');
+
+  // If arriving via an invite link (?room=CODE), jump straight into online
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('room')) setAppMode('online');
+  }, []);
+
+  useEffect(() => {
+    setCustomQuestionsRef(customQuestions, editedQuestions, deletedIds);
+  }, [customQuestions, editedQuestions, deletedIds]);
+
+  // Merge backend questions on mount
+  useEffect(() => {
+    store.mergeBackendQuestions();
+  }, []);
+
+  const handleLeaveOnline = () => {
+    leaveRoom();
+    resetGame();
+    setAppMode('home');
+    // clear ?room= from the URL
+    window.history.replaceState({}, '', window.location.pathname);
+  };
+
+  const handleEnterTraining = () => {
+    resetGame();
+    useGameStore.getState().setTrainingMode(true);
+    setAppMode('local');
+  };
+
+  // ─── Home: choose Local vs Online ───
+  if (appMode === 'home') {
+    return (
+      <>
+        <HomeScreen
+          onLocal={handleEnterTraining}
+          onOnline={() => setAppMode('online')}
+        />
+      </>
+    );
+  }
+
+  // ─── Online mode ───
+  if (appMode === 'online') {
+    if (!roomCode) {
+      return (
+        <>
+          <Lobby onBack={() => setAppMode('home')} />
+        </>
+      );
+    }
+    return (
+      <>
+        <OnlineGame onLeave={handleLeaveOnline} />
+      </>
+    );
+  }
+
+  // ─── Local mode (original same-screen game) ───
+  if (phase === 'setup') {
+    return (
+      <>
+        <PlayerSetup onBack={() => { resetGame(); setAppMode('home'); }} onOpenEditor={() => setShowEditor(true)} />
+        <button onClick={toggleTheme} className="theme-toggle fixed top-5 right-5 z-50" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+        <AnimatePresence>
+          {showEditor && <QuestionEditor onClose={() => setShowEditor(false)} />}
+        </AnimatePresence>
+      </>
+    );
+  }
+
+  if (phase === 'gameover') {
+    return (
+      <>
+        <GameOver onOpenEditor={() => setShowEditor(true)} />
+        <AnimatePresence>
+          {showEditor && <QuestionEditor onClose={() => setShowEditor(false)} />}
+        </AnimatePresence>
+      </>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-warm text-white flex flex-col noise-overlay relative">
+      {/* Top bar */}
+      <header className="px-5 py-3 flex items-center justify-between border-b border-white/[0.06] bg-black/20 backdrop-blur-md flex-shrink-0 relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl overflow-hidden shadow-lg flex-shrink-0">
+            <img src={cdmxBadge} alt="CDMX Seguridad Pública" className="w-full h-full object-cover" />
+          </div>
+          <div>
+            <h1 className="font-display text-xl tracking-wide text-th-primary leading-none">UNIPOL PATROL</h1>
+            <p className="text-[10px] text-th-secondary tracking-widest uppercase">Serve · Protect · Communicate</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={toggleTheme} className="theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+          <button
+            onClick={() => setShowEditor(true)}
+            className="px-3 py-1.5 text-xs text-th-secondary hover:text-th-primary hover:bg-white/[0.06] rounded-lg transition-all font-medium flex items-center gap-1.5"
+            title="Question Editor"
+          >
+            <span className="text-sm">📝</span>
+            <span className="hidden sm:inline">Questions</span>
+            {customQuestions.length > 0 && (
+              <span className="w-4 h-4 rounded-full text-white text-[9px] font-bold flex items-center justify-center" style={{ backgroundColor: '#c8956c' }}>
+                {customQuestions.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => { resetGame(); setAppMode('home'); }}
+            className="px-3 py-1.5 text-xs text-th-secondary hover:text-th-primary hover:bg-white/[0.06] rounded-lg transition-all font-medium"
+          >
+            New Game
+          </button>
+        </div>
+      </header>
+
+      {/* Main content */}
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+        {/* Left sidebar */}
+        <aside className="w-full lg:w-64 p-3 order-2 lg:order-1 overflow-y-auto flex-shrink-0 lg:h-full">
+          <PlayerPanel />
+        </aside>
+
+        {/* Center - Game Board Map */}
+        <main className="flex-1 flex flex-col p-3 order-1 lg:order-2 min-h-0 overflow-hidden">
+          <GameBoard />
+        </main>
+
+        {/* Right sidebar */}
+        <aside className="w-full lg:w-72 p-3 order-3 overflow-y-auto flex-shrink-0 lg:h-full flex flex-col items-center gap-3">
+          <ActionBar />
+          <DistrictInfo />
+          <TriviaCard />
+        </aside>
+      </div>
+
+      {/* Question Editor Modal */}
+      <AnimatePresence>
+        {showEditor && <QuestionEditor onClose={() => setShowEditor(false)} />}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function HomeScreen({ onLocal, onOnline }: { onLocal: () => void; onOnline: () => void }) {
+  const { theme, toggleTheme } = useTheme();
+
+  return (
+    <div className="min-h-screen bg-gradient-warm flex items-center justify-center p-4 relative overflow-hidden noise-overlay">
+      {/* Theme toggle — top right */}
+      <button onClick={toggleTheme} className="theme-toggle fixed top-5 right-5 z-50" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+        {theme === 'dark' ? '☀️' : '🌙'}
+      </button>
+
+      <div className="w-full max-w-md relative z-10 text-center">
+        <div className="w-24 h-24 rounded-2xl overflow-hidden shadow-2xl mx-auto mb-6" style={{ boxShadow: '0 20px 60px rgba(200, 149, 108, 0.3)' }}>
+          <img src={cdmxBadge} alt="CDMX Seguridad Pública" className="w-full h-full object-cover" />
+        </div>
+        <h1 className="font-display text-6xl text-th-primary tracking-wider leading-none mb-2">
+          UNIPOL <span style={{ color: '#c8956c' }}>PATROL</span>
+        </h1>
+        <p className="text-th-secondary text-sm mb-8">Police Cadet English Training Game</p>
+
+        <div className="glass-card rounded-2xl p-6 space-y-3">
+          <button onClick={onOnline} className="w-full px-5 py-4 btn-primary rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+            🌐 Play Online — Invite Friends
+          </button>
+          <button onClick={onLocal} className="w-full px-5 py-4 rounded-xl text-sm font-bold bg-white/[0.06] hover:bg-white/[0.1] text-th-primary border border-th-medium transition-all flex items-center justify-center gap-2">
+            🎯 Training Range — Single Player
+          </button>
+          <p className="text-th-muted text-[11px] pt-1 leading-relaxed">
+            Online: compete with friends on their own devices.<br />
+            Training: practice solo and beat your personal high score.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+export default App;
